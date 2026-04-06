@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -31,6 +32,35 @@ type Bundle struct {
 	Name     string `json:"name"`
 	Headline string `json:"headline"`
 	Tools    []Tool `json:"tools"`
+}
+
+// Custom unmarshal to handle tools as either strings or objects
+func (b *Bundle) UnmarshalJSON(data []byte) error {
+	type Alias struct {
+		Slug     string            `json:"slug"`
+		Name     string            `json:"name"`
+		Headline string            `json:"headline"`
+		Tools    []json.RawMessage `json:"tools"`
+	}
+	var a Alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	b.Slug = a.Slug
+	b.Name = a.Name
+	b.Headline = a.Headline
+	for _, raw := range a.Tools {
+		var t Tool
+		if err := json.Unmarshal(raw, &t); err == nil && t.Slug != "" {
+			b.Tools = append(b.Tools, t)
+		} else {
+			var s string
+			if err := json.Unmarshal(raw, &s); err == nil {
+				b.Tools = append(b.Tools, Tool{Slug: s, Label: titleCase(s)})
+			}
+		}
+	}
+	return nil
 }
 
 type ToolStatus struct {
@@ -259,6 +289,10 @@ func startAll() {
 		os.MkdirAll(toolData, 0755)
 
 		cmd := exec.Command(binPath, "-port", fmt.Sprintf("%d", t.Port), "-data", toolData)
+		cmd.Env = append(os.Environ(),
+			fmt.Sprintf("PORT=%d", t.Port),
+			fmt.Sprintf("DATA_DIR=%s", toolData),
+		)
 		cmd.Stdout = io.Discard
 		cmd.Stderr = io.Discard
 		err := cmd.Start()
@@ -381,4 +415,11 @@ document.getElementById('grid').innerHTML=h;
 })}
 load();setInterval(load,3000);
 </script></body></html>`, bundle.Name, bundle.Name, len(bundle.Tools))
+}
+
+func titleCase(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
