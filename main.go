@@ -279,6 +279,30 @@ func downloadTool(slug, osName, arch string) error {
 	return fmt.Errorf("no binary in archive")
 }
 
+// downloadToolConfig fetches the personalization config.json for a tool
+// and writes it to the tool's data directory. If a config already exists,
+// it is preserved (so user edits are not overwritten).
+func downloadToolConfig(bundleSlug, toolSlug, toolDataDir string) {
+	cfgPath := filepath.Join(toolDataDir, "config.json")
+	if _, err := os.Stat(cfgPath); err == nil {
+		return // already exists, don't overwrite user changes
+	}
+	url := fmt.Sprintf("https://stockyard.dev/api/toolkit/%s/config/%s", bundleSlug, toolSlug)
+	resp, err := http.Get(url)
+	if err != nil || resp.StatusCode != 200 {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return // no config available — totally fine, tool will use defaults
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || len(body) < 2 {
+		return
+	}
+	os.WriteFile(cfgPath, body, 0644)
+}
+
 func startAll() {
 	for i, t := range bundle.Tools {
 		binPath := filepath.Join(toolsDir, "stockyard-"+t.Slug)
@@ -287,6 +311,9 @@ func startAll() {
 		}
 		toolData := filepath.Join(dataDir, t.Slug)
 		os.MkdirAll(toolData, 0755)
+
+		// Download personalization config if not already present
+		downloadToolConfig(bundle.Slug, t.Slug, toolData)
 
 		cmd := exec.Command(binPath, "-port", fmt.Sprintf("%d", t.Port), "-data", toolData)
 		cmd.Env = append(os.Environ(),
