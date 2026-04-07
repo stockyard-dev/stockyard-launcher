@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var version = "0.1.0"
+var version = "0.3.0"
 
 type Tool struct {
 	Slug  string `json:"slug"`
@@ -267,7 +267,11 @@ func downloadTool(slug, osName, arch string) error {
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		dst := filepath.Join(toolsDir, "stockyard-"+slug)
+		exeExt := ""
+		if osName == "windows" {
+			exeExt = ".exe"
+		}
+		dst := filepath.Join(toolsDir, "stockyard-"+slug+exeExt)
 		f, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
 		if err != nil {
 			return err
@@ -304,8 +308,12 @@ func downloadToolConfig(bundleSlug, toolSlug, toolDataDir string) {
 }
 
 func startAll() {
+	exeExt := ""
+	if runtime.GOOS == "windows" {
+		exeExt = ".exe"
+	}
 	for i, t := range bundle.Tools {
-		binPath := filepath.Join(toolsDir, "stockyard-"+t.Slug)
+		binPath := filepath.Join(toolsDir, "stockyard-"+t.Slug+exeExt)
 		if _, err := os.Stat(binPath); err != nil {
 			continue
 		}
