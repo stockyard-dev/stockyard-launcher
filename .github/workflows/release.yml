@@ -1,0 +1,71 @@
+# Canonical Stockyard tool release workflow.
+#
+# Source of truth: stockyard-desktop/release/tool-release.yml.
+# Propagated to every tool repo as .github/workflows/release.yml via
+# release/propagate-tool-release.sh. See ADR-001 for context.
+#
+# Triggers on tag push (v*). Matrix-builds four platforms,
+# UPX-compresses linux+windows (Mach-O is refused by current UPX),
+# uploads raw binaries to GitHub Releases under the ADR-001 naming
+# convention:
+#
+#   <tool>-<goos>-<goarch>
+#
+# No tar.gz. No stockyard- prefix. No .exe suffix. The desktop app's
+# tooldl package downloads the raw binary by URL and renames locally.
+
+name: Release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install UPX
+        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+
+      - name: Build + compress binaries
+        run: |
+          set -euo pipefail
+          TOOL=$(basename "$(ls -d cmd/*/ | head -1)")
+          VERSION=${GITHUB_REF#refs/tags/}
+          mkdir -p dist
+          for target in "linux amd64" "darwin amd64" "darwin arm64" "windows amd64"; do
+            OS=$(echo $target | cut -d' ' -f1)
+            ARCH=$(echo $target | cut -d' ' -f2)
+            OUT="dist/${TOOL}-${OS}-${ARCH}"
+            echo "::group::build ${OS}/${ARCH}"
+            CGO_ENABLED=0 GOOS=$OS GOARCH=$ARCH \
+              go build -trimpath \
+                -ldflags="-s -w -X main.version=${VERSION}" \
+                -o "${OUT}" ./cmd/${TOOL}/
+            # UPX on linux + windows only. UPX 4.2.2 refuses Mach-O
+            # outright ("macOS is currently not supported") — the
+            # --force-macos flag exists but is experimental and
+            # produces binaries that crash at runtime. Darwin tools
+            # ship uncompressed. See ADR-001.
+            if [ "${OS}" != "darwin" ]; then
+              upx --best --lzma "${OUT}"
+            fi
+            sha256sum "${OUT}"
+            echo "::endgroup::"
+          done
+          ls -la dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "dist/*"
+          generate_release_notes: true
+          fail_on_unmatched_files: true
